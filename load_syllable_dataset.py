@@ -17,7 +17,7 @@ class load():
         syllable_7 = syllable_7.split()
         syllable_8 = syllable_8.split()
         syllable_1_6_data = [(syllable_1_6["word"][i].lower(), syllable_1_6["syllable"][i]) for i in
-                             xrange(len(syllable_1_6["syllable"]))]
+                             range(len(syllable_1_6["syllable"]))]
         syllable_7_data = [(i.lower(), 7) for i in syllable_7]
         syllable_8_data = [(i.lower(), 8) for i in syllable_8]
         syllable_9_data = [(i.lower(), 9) for i in syllable_9]
@@ -28,6 +28,7 @@ class load():
             set(syllable_1_6_data + syllable_7_data + syllable_8_data + syllable_9_data + syllable_10_data
                 + syllable_11_data + syllable_12_data))
         return syllable_data
+
 
 if __name__ == '__main__':
     load_obj=load()

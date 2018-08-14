@@ -3,13 +3,14 @@ import numpy as np
 from sklearn.naive_bayes import GaussianNB
 from sklearn.externals import joblib
 import random
-class Syllable():
 
-    def __init__(self,data):
-        self.data=data
+
+class Syllable:
+    def __init__(self, data):
+        self.data = data
 
     def syllables_features(self,word):
-        feature = []
+        feature=[]
         feature.append(len(word))
         feature.append(len(re.findall(r'[bcdfghjklmnpqrstvwxz]+', word)))
         feature.append(len(re.findall(r'[aeiou]', word, flags=re.IGNORECASE)))
@@ -25,7 +26,7 @@ class Syllable():
         feature_vector = np.array(feature)
         return feature_vector
 
-    def sylco(self,word):
+    def sylco(self, word):
         #I have not authored this function, taken from a blog by the person
         word = word.lower()
         # exception_add are words that need extra syllables
@@ -131,18 +132,18 @@ class Syllable():
         random.shuffle(self.data)
         feature_vector = np.empty([len(self.data), 6])
         label = np.empty([len(self.data)])
-        for i in xrange(len(self.data)):
+        for i in range(len(self.data)):
             feature_vector[i] = self.syllables_features(self.data[i][0])
             label[i] = self.data[i][1]
-        return(feature_vector,label)
+        return feature_vector, label
 
     def check_accuracy(self, feature_vector, label):
-        train_feature=feature_vector[:int(len(feature_vector)*0.80)]
-        train_label=label[:int(len(feature_vector)*0.80)]
-        test_feature=feature_vector[int(len(feature_vector)*0.80):]
-        test_label=label[int(len(feature_vector)*0.80):]
-        model=self.train_model(train_feature,train_label)
-        accuracy=model.score(test_feature,test_label)
+        train_feature = feature_vector[:int(len(feature_vector)*0.80)]
+        train_label = label[:int(len(feature_vector)*0.80)]
+        test_feature = feature_vector[int(len(feature_vector)*0.80):]
+        test_label = label[int(len(feature_vector)*0.80):]
+        model = self.train_model(train_feature,train_label)
+        accuracy = model.score(test_feature,test_label)
         return accuracy
 
     def train_model(self, train_features, train_labels):
@@ -151,22 +152,21 @@ class Syllable():
         return clf
 
     def predict(self, model,word):
-        features=self.syllables_features(word)
+        features = self.syllables_features(word)
         features = features.reshape(1, -1)
-        return(model.predict(features)[0])
+        return model.predict(features)[0]
 
     def save_model(self):
-        features, labels=self.build_features()
-        accuracy=self.check_accuracy(features,labels)
-        model=self.train_model(features,labels)
+        features, labels = self.build_features()
+        accuracy = self.check_accuracy(features,labels)
+        model = self.train_model(features,labels)
         joblib.dump(model, 'syllable.pkl')
-        return(accuracy)
+        return accuracy
 
     def model_load(self):
-        print self.data
-        model=joblib.load('syllable.pkl')
-        syl_dict={word:self.predict(model, word) for word in self.data}
-        return(syl_dict)
+        model = joblib.load('syllable.pkl')
+        syl_dict = {word:self.predict(model, word) for word in self.data}
+        return syl_dict
 
 
 
