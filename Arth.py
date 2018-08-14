@@ -1,46 +1,43 @@
 from bs4 import BeautifulSoup
-import re
-import cPickle
-from config import stopwords
-from nltk.stem import WordNetLemmatizer
-import nltk
-import syllable
-import numpy as np
 from scipy import stats
-from sklearn.cluster import DBSCAN
-import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from nltk.stem import WordNetLemmatizer
+from simplified_lesk import Lesk
+import re
+import pickle as cPickle
+import nltk
+import numpy as np
+from config import stopwords
 import random
 from nltk.tokenize import sent_tokenize
-import simplified_lesk
 from nltk.corpus import wordnet
+import unicodedata
 
-file_name=raw_input()
-with open(file_name, "r") as g:
-    text = g.read()
 
 class Arth:
-    def __init__(self,text):
-        self.text=text
+    def __init__(self, text):
+        self.text = re.sub(u"(\u2018|\u2019)", "'", text)
 
-    def get_wordnet_pos(self,words):
-        data=[]
-        treebank_tag=nltk.pos_tag(words)
+    @staticmethod
+    def get_wordnet_pos(words):
+        data = []
+        treebank_tag = nltk.pos_tag(words)
         for i in treebank_tag:
             if i[1].startswith('J'):
-                v=wordnet.ADJ
+                v = wordnet.ADJ
             elif i[1].startswith('V'):
-                v= wordnet.VERB
+                v = wordnet.VERB
             elif i[1].startswith('N'):
-                v=wordnet.NOUN
+                v = wordnet.NOUN
             elif i[1].startswith('R'):
-                v= wordnet.ADV
+                v = wordnet.ADV
             else:
-                v= ''
-            data.append((i[0],v))
+                v = ''
+            data.append((i[0], v))
         return data
 
     def preprocessing(self):
-        '''
+        """
          Implementing preprocessing steps.
          1) Removed HTML tags
          2) Removed Punctuation, numbers and special characters
@@ -50,115 +47,214 @@ class Arth:
          6) Find Unique Words in the text
          7) Removal of stopwords, i.e. words that aren't important
         :return: preprocessed list of words
-        '''
+        """
         object = BeautifulSoup(self.text, "lxml")
-        markup_removed_text=object.get_text()
-        words_only_text = re.sub("[^a-zA-Z]", " ",markup_removed_text)
+        markup_removed_text = object.get_text()
+        markup_removed_text = unicodedata.normalize('NFKD', markup_removed_text).encode('ascii', 'ignore')
+        words_only_text = re.sub("[^a-zA-Z]", " ", markup_removed_text)
         words = [i.lower() for i in words_only_text.split()]
         word_postag_tuple = self.get_wordnet_pos(words)
         wordnet_lemmatizer = WordNetLemmatizer()
-        lemma = []
+        lemma = {}
         for word, pos_tag in word_postag_tuple:
             if pos_tag != "":
-                lemma.append(wordnet_lemmatizer.lemmatize(word, pos=pos_tag))
+                lem = wordnet_lemmatizer.lemmatize(word, pos=pos_tag)
+                if word not in stopwords:
+                    lemma[word] = lem
             else:
-                lemma.append(wordnet_lemmatizer.lemmatize(word))
-        unique_words= list(set(lemma))
-        removed_stopwords=[i for i in unique_words if i not in stopwords]
-        return removed_stopwords
+                if word not in stopwords:
+                    lemma[word] = word
+        return lemma
 
-    def syllable_calculater(self,word_list):
+    def sylco(self, word):
+        # I have not authored this function, taken from a blog by the person
+        word = word.lower()
+        # exception_add are words that need extra syllables
+        # exception_del are words that need less syllable
+        exception_add = ['serious', 'crucial']
+        exception_del = ['fortunately', 'unfortunately']
+        co_one = ['cool', 'coach', 'coat', 'coal', 'count', 'coin', 'coarse', 'coup', 'coif', 'cook', 'coign', 'coiffe',
+                  'coof', 'court']
+        co_two = ['coapt', 'coed', 'coinci']
+        pre_one = ['preach']
+        syls = 0  # added syllable number
+        disc = 0  # discarded syllable number
+        # 1) if letters < 3 : return 1
+        if len(word) <= 3:
+            syls = 1
+            return syls
+        # 2) if doesn't end with "ted" or "tes" or "ses" or "ied" or "ies", discard "es" and "ed" at the end.
+        # if it has only 1 vowel or 1 set of consecutive vowels, discard. (like "speed", "fled" etc.)
+        if word[-2:] == "es" or word[-2:] == "ed":
+            doubleAndtripple_1 = len(re.findall(r'[eaoui][eaoui]', word))
+            if doubleAndtripple_1 > 1 or len(re.findall(r'[eaoui][^eaoui]', word)) > 1:
+                if word[-3:] == "ted" or word[-3:] == "tes" or word[-3:] == "ses" or word[-3:] == "ied" or word[
+                                                                                                           -3:] == "ies":
+                    pass
+                else:
+                    disc += 1
+        # 3) discard trailing "e", except where ending is "le"
+        le_except = ['whole', 'mobile', 'pole', 'male', 'female', 'hale', 'pale', 'tale', 'sale', 'aisle', 'whale',
+                     'while']
+        if word[-1:] == "e":
+            if word[-2:] == "le" and word not in le_except:
+                pass
+            else:
+                disc += 1
+
+        # 4) check if consecutive vowels exists, triplets or pairs, count them as one.
+
+        doubleAndtripple = len(re.findall(r'[eaoui][eaoui]', word))
+        tripple = len(re.findall(r'[eaoui][eaoui][eaoui]', word))
+        disc += doubleAndtripple + tripple
+        # 5) count remaining vowels in word.
+        numVowels = len(re.findall(r'[eaoui]', word))
+        # 6) add one if starts with "mc"
+        if word[:2] == "mc":
+            syls += 1
+
+        # 7) add one if ends with "y" but is not surrouned by vowel
+        if word[-1:] == "y" and word[-2] not in "aeoui":
+            syls += 1
+        # 8) add one if "y" is surrounded by non-vowels and is not in the last word.
+        for i, j in enumerate(word):
+            if j == "y":
+                if (i != 0) and (i != len(word) - 1):
+                    if word[i - 1] not in "aeoui" and word[i + 1] not in "aeoui":
+                        syls += 1
+
+        # 9) if starts with "tri-" or "bi-" and is followed by a vowel, add one.
+        if word[:3] == "tri" and word[3] in "aeoui":
+            syls += 1
+        if word[:2] == "bi" and word[2] in "aeoui":
+            syls += 1
+
+        # 10) if ends with "-ian", should be counted as two syllables, except for "-tian" and "-cian"
+        if word[-3:] == "ian":
+            # and (word[-4:] != "cian" or word[-4:] != "tian") :
+            if word[-4:] == "cian" or word[-4:] == "tian":
+                pass
+            else:
+                syls += 1
+
+        # 11) if starts with "co-" and is followed by a vowel, check if exists in the double syllable dictionary, if not, check if in single dictionary and act accordingly.
+
+        if word[:2] == "co" and word[2] in 'eaoui':
+            if word[:4] in co_two or word[:5] in co_two or word[:6] in co_two:
+                syls += 1
+            elif word[:4] in co_one or word[:5] in co_one or word[:6] in co_one:
+                pass
+            else:
+                syls += 1
+        # 12) if starts with "pre-" and is followed by a vowel, check if exists in the double syllable dictionary, if not, check if in single dictionary and act accordingly
+
+        if word[:3] == "pre" and word[3] in 'eaoui':
+            if word[:6] in pre_one:
+                pass
+            else:
+                syls += 1
+        # 13) check for "-n't" and cross match with dictionary to add syllable.
+        negative = ["doesn't", "isn't", "shouldn't", "couldn't", "wouldn't"]
+        if word[-3:] == "n't":
+            if word in negative:
+                syls += 1
+            else:
+                pass
+        # 14) Handling the exceptional words.
+        if word in exception_del:
+            disc += 1
+        if word in exception_add:
+            syls += 1
+        # calculate the output
+        return numVowels - disc + syls
+
+    def syllable_calculater(self, word_list):
         '''
 
         :param word_list:
         :return: Dictionary of syllables
         '''
-        syllable_obj = syllable.Syllable(word_list)
-        syllable_dict=syllable_obj.model_load()
+        #         syllable_obj = Syllable(word_list)
+        #         syllable_dict=syllable_obj.model_load()
+        syllable_dict = {}
+        for i in word_list:
+            syllable_dict[i] = self.sylco(i)
         return syllable_dict
 
-    def usage_calc(self,word_list):
-        freq_dict={}
-        with open("freq_dict.pickle","rb") as g:
-            freq=cPickle.load(g)
+    def usage_calc(self, word_list):
+        freq_dict = {}
+        with open("freq_dict.pickle", "rb") as g:
+            freq = cPickle.load(g)
         for word in word_list:
             if word in freq:
-                freq_dict[word]=freq[word]
+                freq_dict[word] = freq[word]
             else:
-                freq_dict[word]=0
+                freq_dict[word] = 0
         return freq_dict
 
     def getfeatures_normalize(self):
-        word_list=self.preprocessing()
-        syll=self.syllable_calculater(word_list)
-        frequency=self.usage_calc(word_list)
-        feature=[]
-        vocab={k:v for k,v in enumerate(word_list)}
-        for i in xrange(len(word_list)):
-            feature.append((frequency[word_list[i]],syll[word_list[i]]))
-        zscor=stats.zscore(feature)
-        return zscor,vocab
+        word_list = self.preprocessing()
+        syll = self.syllable_calculater(list(word_list.keys()))
+        frequency = self.usage_calc(list(word_list.values()))
+        feature = []
+        vocab = {k: v for k, v in enumerate(word_list)}
+        for i in word_list:
+            feature.append([frequency[word_list[i]], syll[i]])
+        feature = np.array(feature)
+        zscor = stats.zscore(feature, axis=0)
+        return zscor, vocab
 
-    def clustering(self,show):
-        cluster_words={}
-        zsc,vocab=self.getfeatures_normalize()
-        db=DBSCAN()
+    def clustering(self, show):
+        cluster_words = {}
+        zsc, vocab = self.getfeatures_normalize()
+        db = KMeans(n_clusters=5)
         db.fit(zsc)
         labels = db.labels_
         for i in set(labels):
-            cluster_words[i]=[]
+            cluster_words[i] = []
         for j, k in enumerate(labels):
             cluster_words[k].append(vocab[j])
-        n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
-        if show==1:
-        # Black removed and is used for noise instead.
-            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
-            core_samples_mask[db.core_sample_indices_] = True
-            unique_labels = set(labels)
-            colors = plt.cm.Spectral(np.linspace(0, 1, len(unique_labels)))
-            for k, col in zip(unique_labels, colors):
-                if k == -1: # Black used for noise.
-                    col = 'k'
-                class_member_mask = (labels == k)
-                xy = zsc[class_member_mask & core_samples_mask]
-                plt.plot(xy[:, 1], xy[:, 0], 'o', markerfacecolor=col,
-                 markeredgecolor='k', markersize=14, hold=True)
-                xy = zsc[class_member_mask & ~core_samples_mask]
-                plt.plot(xy[:, 1], xy[:, 0], 'o', markerfacecolor=col,
-                 markeredgecolor='k', markersize=6, hold=True)
-            plt.show()
-        return(cluster_words)
+        return cluster_words
 
-    def corect_ans_gen(self,word,sent_ret):
-        leskobj=simplified_lesk.Lesk(word,sent_ret)
-        return(leskobj.simplified_lesk(True))
+    def corect_ans_gen(self, word, sent_ret):
+        leskobj = Lesk(word, sent_ret)
+        return leskobj.simplified_lesk(True)
 
-    def sent_retrieval(self,word,sent_tokenize_list):
+    def sent_retrieval(self, word, sent_tokenize_list):
         for j in sent_tokenize_list:
             if re.search(word, j, re.IGNORECASE):
-                return(j)
+                return (j)
 
-    def wrong_ans_gen(self,input_word,sent_ret, correct_syns, word_list):
-        wrong_answer={}
+    def wrong_ans_gen(self, input_word, sent_ret, correct_syns, word_list):
+        x=[]
+        r=[]
         # for i in sent_ret:
         not_list = [input_word]
-        wrong=[]
-        word=input_word
+        wrong = []
+        word = input_word
         try:
-            antonym=correct_syns[0].antonyms()
-            wrong += [j.definition() for j in antonym if j!=[]]
+            antonym = correct_syns[0].antonyms()
+            wrong += [j.definition() for j in antonym if j != []]
         except:
-            wrong+=correct_syns[0].lemmas()[0].antonyms()
-        word_syn=wordnet.synsets(input_word)
-        syn_wrong=[j for j in word_syn if wordnet.wup_similarity(correct_syns[0],j)<0.25]
-        wrong+=syn_wrong
-        if len(wrong)>=3:
-            wrong=wrong[:3]
+            wrong += [k.synset().definition() for k in correct_syns[0].lemmas()[0].antonyms()]
+        word_syn = wordnet.synsets(input_word)
+        try:
+            syn_wrong = [j.definition() for j in word_syn if
+                         not wordnet.wup_similarity(correct_syns[0], j) or wordnet.wup_similarity(correct_syns[0],
+                                                                                                  j) < 0.25]
+        except:
+            x.append(word_syn)
+            r.append(correct_syns)
+            return
+        wrong += syn_wrong
+        if len(wrong) >= 3:
+            wrong = wrong[:3]
         else:
             len_wrong = len(wrong)
-            while word in not_list or len_wrong<3:
-                word=word_list[random.randint(0,len(word_list)-1)]
-                if len_wrong<3:
+            while word in not_list or len_wrong < 3:
+                word1 = list(word_list.keys())
+                word = word1[random.randint(0, len(word1) - 1)]
+                if len_wrong < 3:
                     if word not in not_list:
                         wrong.append(word)
                         not_list.append(word)
@@ -167,37 +263,63 @@ class Arth:
         # wrong_answer[input_word]=wrong
         return wrong
 
-    def word_gen(self, word_list):
-        clusters=self.clustering(0)
+    def word_gen(self):
+        clusters = self.clustering(0)
+        word_list = self.preprocessing()
         sent_tokenize_list = sent_tokenize(self.text)
-        word_selection=[]
-        data={}
+        word_selection = []
+        data = {}
+        random.seed(10)
         for i in clusters:
-            data[i]={}
-            count=0
+            data[i] = {}
+            count = 0
             ind = random.randint(0, (len(clusters[i]) - 1))
-            while(count!=5):
-                sent_ret = self.sent_retrieval(clusters[i][ind],sent_tokenize_list)
+            while count != 5:
+                sent_ret = self.sent_retrieval(clusters[i][ind], sent_tokenize_list)
                 correct_syns = self.corect_ans_gen(clusters[i][ind], sent_ret)
-                if correct_syns!=[]:
+                if correct_syns:
                     wrong_ans = self.wrong_ans_gen(clusters[i][ind], sent_ret, correct_syns, word_list)
                 else:
-                    wrong_ans=[]
+                    wrong_ans = []
                 if wrong_ans != [] and correct_syns != []:
                     word_selection.append(clusters[i][ind])
-                    data[i][clusters[i][ind]] = {}
-                    data[i][clusters[i][ind]]["sentence"] = sent_ret
-                    data[i][clusters[i][ind]]["correct"] = correct_syns
-                    data[i][clusters[i][ind]]["wrong"] = wrong_ans
+                    data[i][(clusters[i][ind], sent_ret)] = {}
+                    data[i][(clusters[i][ind], sent_ret)]["correct"] = correct_syns[0].definition()
+                    data[i][(clusters[i][ind], sent_ret)]["wrong"] = wrong_ans
                     count += 1
                 word_selection.append(clusters[i][ind])
-                while clusters[i][ind] in word_selection or wordnet.synsets(clusters[i][ind])==[]:
+                c=0
+                while clusters[i][ind] in word_selection or wordnet.synsets(clusters[i][ind]) == []:
                     ind = random.randint(0, (len(clusters[i]) - 1))
-        return(data)
+                    print(clusters[i][ind])
+                    print(word_selection)
+                    print("****")
+                    if c == 50:
+                        break
+                    c+=1
+        return data, clusters
 
+    def final_text(self, correct, clusters):
+        difficult_words = []
+        for i in correct:
+            if correct[i]/5.0 < 60.0:
+                difficult_words.extend(clusters[int(i)])
+        difficult_words = set(difficult_words)
+        paragraph = self.text.split("\n")
+        final = []
+        for j in range(len(paragraph)):
+            sent_tokenize_list = sent_tokenize(paragraph[j])
+            for i in difficult_words:
+                if i.lower() in paragraph[j].lower():
+                    for k in range(len(sent_tokenize_list)):
+                        if i.lower() in sent_tokenize_list[k].lower():
+                            try:
+                                meaning = self.corect_ans_gen(i, sent_tokenize_list[k])[0].definition()
+                            except:
+                                meaning = ""
+                            sent_tokenize_list[k] = re.sub(" " + i + " ", " " + i + " (" + meaning + ") ",
+                                                               sent_tokenize_list[k])
+            new_para = " ".join(sent_tokenize_list)
+            final.append(new_para)
+        return "\n".join(final)
 
-
-
-s=Arth(text)
-word_list=s.preprocessing()
-print s.word_gen(word_list)

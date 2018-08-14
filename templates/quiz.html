@@ -1,0 +1,12 @@
+<h1>Vocabulary Quiz</h1>
+<form action='http://localhost:5000/quiz_result' method='POST'>
+    <ol>
+        {% for i in q %}
+            <li>{{i}}</li>
+            {% for j in o[i] %}
+                <input type='radio' value='{{j}}' name='{{i}}' />{{j}}
+            {% endfor %}
+        {% endfor %}
+    </ol>
+    <input type="submit" value="submit" />
+</form>
